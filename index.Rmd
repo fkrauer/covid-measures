@@ -1,0 +1,247 @@
+---
+title: "Implementation of control measures to mitigate the spread COVID-19 in Switzerland"
+author: "Fabienne Krauer, Johannes Bracher, Maria Bekker-Nielsen Dunbar, Muriel Buri, Nicolo Lardelli, Jonas Oesch, Simone Bafelli"
+date: "2020-04-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+Sys.setlocale("LC_TIME", "English")  
+
+```
+
+
+```{r libraries, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(reshape2)
+```
+
+
+```{r, echo=FALSE, warning=F, message=F}
+measures <- read.csv("data/measures_CH_2020-04-06.csv", stringsAsFactors = F)
+measures$date <- as.Date(measures$date)
+cases <- read.csv("https://raw.githubusercontent.com/openZH/covid_19/master/COVID19_Fallzahlen_CH_total_v2.csv", header=T, stringsAsFactors = F)
+cases$date <- as.Date(cases$date)
+colnames(cases)[3] <- "unit"
+cases <- cases %>% dplyr::group_by(unit) %>% dplyr::arrange(date) %>% 
+  dplyr::mutate(ninc_conf=c(ncumul_conf[1], diff(ncumul_conf, lag=1)), ninc_deaths=c(ncumul_deceased[1], diff(ncumul_deceased, lag=1)))
+
+data <- merge(cases[,c("date", "unit", "ninc_conf", "ninc_deaths")], measures[,-1], by=c("date", "unit"), all=T)
+data <- data[data$unit!="FL",]
+data <- data[data$date>=as.Date("2020-02-20") & data$date<=as.Date("2020-04-09"),]
+data <- data %>% dplyr::group_by(unit) %>% dplyr::arrange(date) %>% dplyr::mutate(time=1:n(), maxcases=max(ninc_conf, na.rm=T)*1.05) %>% fill(.,events:recommendations)
+data <- data %>% dplyr::group_by(unit, events) %>% dplyr::arrange(date) %>% 
+  dplyr::mutate(eventsmin=min(time)-0.5, eventsmax=max(time)+0.5)
+
+data$obs <- 1:nrow(data)
+
+apple <- read.csv("applemobilitytrends-2020-04-16.csv", header=T, stringsAsFactors=FALSE)
+apple <- apple[apple$region=="Zurich",-1]
+apple <- reshape2::melt(apple)
+apple$variable <- as.character(apple$variable)
+colnames(apple) <- c("unit", "mobitracktype", "date", "mobitrack")
+apple$unit <- "ZH"
+apple$date <- gsub("X", "", apple$date)
+apple$date <- as.Date(apple$date, format="%Y.%m.%d")
+apple <- dcast(apple, unit + date  ~ mobitracktype)
+
+data <- merge(data, apple, by=c("unit", "date"), all=T)
+data <- data[data$date>=as.Date("2020-02-20") & data$date<=as.Date("2020-04-09"),]
+```
+
+# Background
+
+Since February 25, 2020 Switzerland has been affected by COVID-19. Modelling predictions show that this pandemic will not stop on its own and that stringent migitation strategies are needed. Switzerland has implemented a series of measures both at cantonal and federal level. On March 16, 2020 the Federal Council of Switzerland declared ["extraordinary situation"](https://www.admin.ch/gov/en/start/documentation/media-releases.msg-id-78454.html) and introduced a series of stringent measures. This includes the closure of schools, restaurants, bars, businesses with close contact (e.g. hair dressers), entertainment or leisure facilities. Incoming cross-border mobility from specific countries is also restricted to Swiss citizens, residency holders or work commuters. As of March 20, 2020 mass gatherings of more than five people are also banned. Already in early March various cantons had started to ban events of various sizes and have restricted or banned access to short- and long-term care facilites and day care centers. 
+
+
+The aim of this project is to collect and categorize these control measures implemented and provide a continously updated data set, which can be used for modelling or visualization purposes. This is a collaborative project initiated by [Fabienne Krauer](https://github.com/fkrauer) and [Simone Baffelli](https://github.com/baffelli). The following persons have contributed substantially to the data collection: [Johannes Bracher](https://github.com/jbracher), [Maria Bekker-Nielsen Dunbar](https://github.com/mariabnd), [Muriel Buri](https://github.com/mrllynn), [Nicolo Lardelli](https://github.com/lardellin), and [Jonas Oesch](https://github.com/jonasoesch). These [data](https://github.com/baffelli/covid-2019-measures) can be used for research. Please cite this dataset using the DOI 10.5281/zenodo.3749747. 
+
+
+# Data collection
+
+We collect the date/duration and level of the most important measures taken in response to COVID-19 from official cantonal and federal press releases. We consider the following measures:
+
+| measure | levels | comment |
+|-------------------------------------|-----------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| carefacilities  | 0=no restriction <br> 1=restricted access <br/> 2=access prohibited | includes hospitals, nursing and disabled homes |
+| casemanagement  | 0=none <br> 1=in place <br/> | includes testing, isolation, quarantine and triage |
+| daycare | 0=no restriction <br>1=restricted access or closed  <br/> | includes Krippe and Hort |
+| events | 0=no restriction <br> 1=events > 1000 persons banned <br/>  2=events > 500 persons banned <br>3=events > 100 persons banned <br> 4=events > 50 persons banned <br> 5=events > 10 persons banned <br/> 6=events > 5 persons banned | includes events and mass gatherings of any kind |
+| stayathome | 0=no  <br>1=yes <br/> | Switzerland does not have an official "lockdown" policy in the sense of a shelter-in-place order. This category means a "strong recommendation to stay at home".  |
+| mobilityint     | 0=no restriction <br> 1=restriction of cross-border mobility <br/> 2=closing of borders | |
+| publicoffices   | 0=no restriction <br>1=closed <br/>| includes public offices with counters such as tax office or vehicle registration office |
+| publicplaces    | 0=no restriction <br>1=closed <br/>| includes museums, sports facilities |
+| publictransport | 0=no restriction <br>1=reduced <br/>| |
+| recommendations | 0=no <br>1=yes <br/>| includes information campaigns and general recommendations such as respiratory hygiene and physical distancing |
+| retailgastro    | 0=no restriction <br>1=restricted access <br/> 2=closure | includes all non-essential retail, gastronomy and entertainment places as well as businesses with direct contact (hair dressers, massage,…) |
+| schools | 0=no restriction <br>1=closed <br/> | includes primary and secondary school as well as Kindergarten |
+| universities    | 0=no restriction <br>1=closed <br/>| | |
+
+
+# Results
+
+The following figures are based on the data until April 6, 2020. The "extraordinary situtation" will be in place until April 26, 2020. 
+
+The graph below shows the time series of incident confirmed cases (grey) and the incident deaths (black) as well as the development of some control measures by Canton. The red line marks the federal ordinance of March 16, 2020 ("extraordinary situation"). The pink shades indicate the ban of events or mass gatherings that were implemented by the Cantons. 
+
+```{r fig.height=25, fig.width=15, echo=FALSE, warning=FALSE}
+breaks <- seq(1, max(data$time), by=8)
+labels <- format(unique(data$date[data$time %in% breaks]), format="%b-%d")
+
+ggplot(data) + 
+geom_rect(aes(xmin=eventsmin, xmax=eventsmax, ymin=0, ymax=maxcases, fill=as.factor(events))) +
+  scale_fill_manual(values=c("#FFFFFF", "#FBEEE6", "#FFE5D8", "#FFCAD4", "#F3ABB6", "pink3", "#9F8189"),
+                    breaks=c("0", "1", "2", "3", "4", "5", "6"),
+                    labels=c("no restriction", "events > 1000 banned", 
+                             "events > 500 banned", "events > 100 banned", 
+                             "events > 50 banned", "events > 10 banned", 
+                             "events > 5 banned")) +
+  geom_bar(aes(x=time, y=ninc_conf), stat="identity", fill="grey35", color="grey35") +
+  geom_bar(aes(x=time, y=ninc_deaths), stat="identity", fill="black", color="black") +
+  geom_vline(aes(xintercept=27.5, colour="measure1"), size=1) +
+  ylab("incident confirmed cases") + xlab(NULL) + theme_minimal() +
+  scale_x_continuous(breaks=breaks,
+                     labels=labels) +
+  theme(axis.text.x=element_text(angle=90, vjust=0)) + 
+  scale_y_continuous(expand=c(0,0)) + 
+  labs(fill="Event restrictions") + 
+  scale_color_manual(name = "National measures", values = c(measure1 = "red"), labels="closure of schools,  \nretail/gastronomy  \nand soft lockdown") +
+  facet_wrap(~ unit, scale="free_y", ncol=3, strip.position="top")
+```
+
+For Zürich we can add time-resolved mobility data available from Iphone users (provided by [Apple](https://www.apple.com/covid19/mobility)). The data represent relative changes from the baseline prior to COVID-19 (right axis of the plot below):
+
+
+```{r fig.height=6, fig.width=8, echo=FALSE, warning=FALSE}
+breaks <- seq(1, max(data$time), by=8)
+labels <- format(unique(data$date[data$time %in% breaks]), format="%b-%d")
+scale <- 1/2.6
+
+ggplot(data[data$unit=="ZH",]) + 
+geom_rect(aes(xmin=eventsmin, xmax=eventsmax, ymin=0, ymax=maxcases, fill=as.factor(events))) +
+  scale_fill_manual(values=c("#FFFFFF", "#FBEEE6", "#FFE5D8", "#FFCAD4", "#F3ABB6", "pink3", "#9F8189"),
+                    breaks=c("0", "1", "2", "3", "4", "5", "6"),
+                    labels=c("no restriction", "events > 1000 banned", 
+                             "events > 500 banned", "events > 100 banned", 
+                             "events > 50 banned", "events > 10 banned", 
+                             "events > 5 banned")) +
+  geom_bar(aes(x=time, y=ninc_conf), stat="identity", fill="grey35", color="grey35") +
+  geom_bar(aes(x=time, y=ninc_deaths), stat="identity", fill="black", color="black") +
+  geom_vline(aes(xintercept=27.5, colour="red"), size=1) +
+  geom_line(aes(x=time, y=driving/scale, colour="black")) +
+  geom_line(aes(x=time, y=transit/scale, colour="green")) +
+  geom_line(aes(x=time, y=walking/scale, colour="blue")) +
+  ylab("incident confirmed cases") + xlab(NULL) + theme_minimal() +
+  scale_x_continuous(breaks=breaks,
+                     labels=labels) +
+  theme(axis.text.x=element_text(angle=90, vjust=0)) + 
+  scale_y_continuous(expand=c(0,0),
+                     sec.axis=sec_axis(~.*scale)) + 
+  labs(fill="Event restrictions") + 
+  scale_color_identity(guide = "legend",
+                       name= "Legend for line colors",
+                       breaks=c("red", "black", "green", "blue"),
+                       labels=c("closure of schools,  \nretail/gastronomy  \nand soft lockdown\n", "reduction in driving (apple)", "reduction in transit (apple)", "reduction in walking (apple)"))
+```
+
+
+The following plots show selected control measures by canton:
+
+1. Events and mass gatherings
+```{r fig.height=10, fig.width=15, echo=FALSE}
+ggplot(data) + geom_tile(aes(x=date, y=reorder(unit, desc(unit)), fill=as.factor(events)), color="grey") +
+  xlab(NULL) + ylab(NULL)  +  
+  scale_x_date(expand=c(0,0), breaks=date_breaks(width="1 week")) + 
+  theme(axis.text.x=element_text(angle=90, vjust=0.5),
+        axis.ticks = element_blank()) + 
+  labs(fill="category") +
+  scale_fill_brewer(palette="Blues", 
+                    labels=c("no restriction", "events > 1000 banned", 
+                             "events > 500 banned", "events > 100 banned", 
+                             "events > 50 banned", "events > 10 banned", 
+                             "events > 5 banned")) +
+  ggtitle("Events and mass gatherings")
+```
+
+
+2. Visitor access to long- and short-term care facilities (hospitals, nursing and disabled homes)
+```{r fig.height=10, fig.width=15, echo=FALSE}
+ggplot(data) + geom_tile(aes(x=date, y=reorder(unit, desc(unit)), fill=as.factor(carefacilities)), color="grey") +
+  xlab(NULL) + ylab(NULL)  +  
+  scale_x_date(expand=c(0,0), breaks=date_breaks(width="1 week")) + 
+  theme(axis.text.x=element_text(angle=90, vjust=0.5),
+        axis.ticks = element_blank()) + 
+  labs(fill="category") +
+  scale_fill_brewer(palette="Greens", 
+                    labels=c("no restriction", "access restricted", 
+                             "access prohibited")) +
+  ggtitle("Short- and long-term care facilities")
+```
+
+3. Access to retail, gastronomy and leisure/entertainment facilities
+```{r fig.height=10, fig.width=15, echo=FALSE}
+ggplot(data) + geom_tile(aes(x=date, y=reorder(unit, desc(unit)), fill=as.factor(retailgastro)), color="grey") +
+  xlab(NULL) + ylab(NULL)  +  
+  scale_x_date(expand=c(0,0), breaks=date_breaks(width="1 week")) + 
+  theme(axis.text.x=element_text(angle=90, vjust=0.5),
+        axis.ticks = element_blank()) + 
+  labs(fill="category") +
+  scale_fill_brewer(palette="Purples", 
+                    labels=c("no restriction", "access restricted", 
+                             "closed")) +
+  ggtitle("Retail, gastronomy and entertainment")
+```
+
+4. Day care (Krippe, Hort)
+```{r fig.height=10, fig.width=15, echo=FALSE}
+ggplot(data) + geom_tile(aes(x=date, y=reorder(unit, desc(unit)), fill=as.factor(daycare)), color="grey") +
+  xlab(NULL) + ylab(NULL)  +  
+  scale_x_date(expand=c(0,0), breaks=date_breaks(width="1 week")) + 
+  theme(axis.text.x=element_text(angle=90, vjust=0.5),
+        axis.ticks = element_blank()) + 
+  labs(fill="category") +
+  scale_fill_manual(values=c("white", "grey50"), 
+                    labels=c("no restriction", "closed or restricted access")) +
+  ggtitle("Day care")
+```
+
+5. Public and administrative offices
+```{r fig.height=10, fig.width=15, echo=FALSE}
+ggplot(data) + geom_tile(aes(x=date, y=reorder(unit, desc(unit)), fill=as.factor(publicoffices)), color="grey") +
+  xlab(NULL) + ylab(NULL)  +  
+  scale_x_date(expand=c(0,0), breaks=date_breaks(width="1 week")) + 
+  theme(axis.text.x=element_text(angle=90, vjust=0.5),
+        axis.ticks = element_blank()) + 
+  labs(fill="category") +
+  scale_fill_manual(values=c("white", "grey50"), 
+                    labels=c("open", "closed")) +
+  ggtitle("Public offices")
+```
+
+6. Public transport
+```{r fig.height=10, fig.width=15, echo=FALSE}
+ggplot(data) + geom_tile(aes(x=date, y=reorder(unit, desc(unit)), fill=as.factor(publictransport)), color="grey") +
+  xlab(NULL) + ylab(NULL)  +  
+  scale_x_date(expand=c(0,0), breaks=date_breaks(width="1 week")) + 
+  theme(axis.text.x=element_text(angle=90, vjust=0.5),
+        axis.ticks = element_blank()) + 
+  labs(fill="category") +
+  scale_fill_manual(values=c("white", "grey50"), 
+                    labels=c("normal", "reduced")) +
+  ggtitle("Public transport")
+```
+
+# More resources
+
+The case data are curated by the [Specialist Unit for Open Government Data Canton of Zurich](https://github.com/openZH).
+
+An interactive dashboard of cases in Switzerland can be found [here](https://rastrau.shinyapps.io/covidmonitor/) and [here](https://www.corona-data.ch/)
+
+Last updated: `r Sys.Date()`
+
+
+ 
